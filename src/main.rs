@@ -1,11 +1,35 @@
-mod get_dialogs; // Import the get_dialogs module
+mod constants;
+mod extract_token_address;
+mod get_dialogs;
+mod handle_incoming_message;
+mod download_profile_photo;
 
 use dotenv::dotenv;
+use download_profile_photo::download_profile_photo;
 use get_dialogs::get_all_chats;
-use grammers_client::{Client, Config, SignInError};
+use grammers_client::{Client, Config, SignInError, Update};
 use grammers_session::Session;
+use handle_incoming_message::handle_message;
 use std::env;
 use tokio::fs;
+use tokio::task;
+
+async fn start_message_listener(client: Client) -> tokio::task::JoinHandle<()> {
+    task::spawn(async move {
+        loop {
+            match client.next_update().await {
+                Ok(update) => {
+                    if let Update::NewMessage(message) = update {
+                        handle_message(&message);
+                    }
+                }
+                Err(e) => {
+                    eprintln!("Error receiving update: {:?}", e);
+                }
+            }
+        }
+    })
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -53,17 +77,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Connected to Telegram!");
 
-    let carranza = &(client.resolve_username("diloytte").await?.unwrap());
+    if let Err(e) = download_profile_photo(&client, "diloytte", "./photos/taranda.jpg").await {
+        eprintln!("Error downloading profile photo: {}", e);
+    }
+    // get_all_chats(&client).await?;
 
-    let me_downloadable_photo = &(carranza.photo_downloadable(false).unwrap());
+    let message_listener = start_message_listener(client).await;
 
-    client.download_media(me_downloadable_photo,"./photos/mephoto.jpg" ).await?;
-
-    dbg!(me_downloadable_photo);
-
-    dbg!(Some(carranza));
-
-    get_all_chats(&client).await?;
+    message_listener.await?;
 
     Ok(())
 }
